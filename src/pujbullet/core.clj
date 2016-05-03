@@ -1,6 +1,8 @@
 (ns pujbullet.core
-  (:require [aleph.http :as http]
-            [clj-time.core :as cljt]
+  (:require byte-streams
+            [aleph.http :as http]
+            [manifold.stream :as stream]
+            [cheshire.core :refer [parse-string]]
             [pujbullet.url :as url]))
 
 (defn tnow []
@@ -21,9 +23,12 @@
 (defn pull [opts]
   (let [apikey (apikey? opts)
         endpoint (url/encode opts)]
-    @(http/get endpoint
-                {:headers
-                  {"Access-Token" apikey}})))
+    (as-> endpoint _
+      @(http/get _ {:headers {"Access-Token" apikey}})
+      (:body _)
+      (byte-streams/convert _ String)
+      (parse-string _)
+      (get _ "pushes"))))
 
 ;;-- Different setups required
 (defmulti push
@@ -40,13 +45,21 @@
   (println opts))
 
 ;;--- Socket Subscription
-(def sock-conn (atom {}))
+(defn default-handle [msg]
+  (prn 'tickle! msg))
 
-(defn connect-socket [& {:keys [apikey] :or {apikey (apikey? {})}}]
-  (swap! sock-conn assoc :conn
-                         @(http/websocket-client
-                            (str "wss://stream.pushbullet.com/websocket/" apikey))))
+(def socket-handle
+  (atom nil))
 
-;in a run forever to get nops and tickles
-;@(s/take! conn)
+(defn handle-wrap [msg]
+  (-> msg
+    (parse-string)
+    (@socket-handle)))
+
+(defn run-forever [& {:keys [apikey handle]
+                      :or {apikey (apikey? {})
+                           handle default-handle}}]
+  (reset! socket-handle handle)
+  (let [conn @(http/websocket-client (str "wss://stream.pushbullet.com/websocket/" apikey))]
+    (stream/consume handle-wrap conn)))
 
