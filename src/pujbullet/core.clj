@@ -2,13 +2,13 @@
   (:require byte-streams
             [aleph.http :as http]
             [manifold.stream :as stream]
-            [cheshire.core :refer [parse-string]]
+            [cheshire.core :refer [parse-string generate-string]]
             [pujbullet.url :as url]))
 
 (defn tnow []
   (quot (System/currentTimeMillis) 1000))
 
-;;-- Optionally setup config once
+;;-- Config setup
 (def config (atom {:key "setkey"}))
 
 (defn set-key [k]
@@ -19,24 +19,62 @@
   [opts]
   (get opts :key (:key @config)))
 
+;;-- Decode byte-stream response
+(defn decode-resp [resp]
+  (-> resp
+    (:body)
+    (byte-streams/convert String)
+    (parse-string)))
+
 ;;-- Pull specified :type key
 (defn pull [opts]
   (let [apikey (apikey? opts)
         endpoint (url/encode opts)]
     (as-> endpoint _
       @(http/get _ {:headers {"Access-Token" apikey}})
-      (:body _)
-      (byte-streams/convert _ String)
-      (parse-string _)
-      (get _ "pushes"))))
+      (decode-resp _))))
 
-;;-- Different setups required
+;;-- Dismiss
+(defn dismiss [opts]
+  (let [apikey (apikey? opts)
+        endpoint (url/encode opts)]
+    (as-> endpoint _
+    @(http/post _
+                {:headers {"Access-Token" apikey
+                           "Content-Type" "application/json"}
+                 :body (generate-string {"dismissed" true})})
+    (decode-resp _)
+    (prn _))))
+
+;;-- Delete
+(defn delete [opts]
+  (let [apikey (apikey? opts)
+        endpoint (url/encode opts)]
+    (as-> endpoint _
+      @(http/delete _ {:headers {"Access-Token" apikey}})
+      (decode-resp _)
+      (prn _))))
+
+;;-- Pushes, setups required
 (defmulti push
   (fn [opts]
     (:type opts)))
 
 (defmethod push :note [opts]
-  (println opts))
+  (let [apikey (apikey? opts)
+        endpoint (url/encode opts)
+        title (opts :title)
+        body (opts :body)]
+    (if (nil? body)
+      (throw (Throwable. "message body required"))
+      (as-> endpoint _
+        @(http/post _ {:headers {"Access-Token" apikey
+                                 "Content-Type" "application/json"}
+                       :body (generate-string {"body" body
+                                               "title" title
+                                               "type" "note"})})
+        (decode-resp _)
+        (prn _)))))
 
 (defmethod push :link [opts]
   (println opts))
@@ -56,10 +94,14 @@
     (parse-string)
     (@socket-handle)))
 
-(defn run-forever [& {:keys [apikey handle]
-                      :or {apikey (apikey? {})
-                           handle default-handle}}]
+(defn run-forever
+  "Attaches a custom handle to Pushbullet event stream.
+   Supplied handle should accept a map (status pings)"
+  [& {:keys [apikey handle]
+      :or {apikey (apikey? {})
+           handle default-handle}}]
   (reset! socket-handle handle)
-  (let [conn @(http/websocket-client (str "wss://stream.pushbullet.com/websocket/" apikey))]
+  (let [conn @(http/websocket-client (url/ws apikey))]
     (stream/consume handle-wrap conn)))
+
 
