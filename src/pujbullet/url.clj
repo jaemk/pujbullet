@@ -7,6 +7,9 @@
    :me "users/me"
    :pushes "pushes"
    :note "pushes"
+   :link "pushes"
+   :file "pushes"
+   :upload "upload-request"
    :devices "devices"
    :chats "chats"
    :modified-after "modified_after="})

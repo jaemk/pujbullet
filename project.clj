@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [aleph "0.4.1"]
                  [byte-streams "0.2.2"]
-                 [cheshire "5.6.1"]])
+                 [cheshire "5.6.1"]
+                 [ring/ring-core "1.4.0"]])

@@ -1,7 +1,9 @@
 (ns pujbullet.core
   (:require byte-streams
+            [clojure.string :as string]
             [aleph.http :as http]
             [manifold.stream :as stream]
+            [ring.util.mime-type :as mime]
             [cheshire.core :refer [parse-string generate-string]]
             [pujbullet.url :as url]))
 
@@ -36,6 +38,7 @@
 
 ;;-- Dismiss
 (defn dismiss [opts]
+  (println "dismissing")
   (let [apikey (apikey? opts)
         endpoint (url/encode opts)]
     (as-> endpoint _
@@ -43,17 +46,18 @@
                 {:headers {"Access-Token" apikey
                            "Content-Type" "application/json"}
                  :body (generate-string {"dismissed" true})})
-    (decode-resp _)
-    (prn _))))
+    (decode-resp _)))
+  (println "dismissed!"))
 
 ;;-- Delete
 (defn delete [opts]
+  (println "deleting")
   (let [apikey (apikey? opts)
         endpoint (url/encode opts)]
     (as-> endpoint _
       @(http/delete _ {:headers {"Access-Token" apikey}})
-      (decode-resp _)
-      (prn _))))
+      (decode-resp _)))
+  (println "deleted!"))
 
 ;;-- Pushes, setups required
 (defmulti push
@@ -77,10 +81,46 @@
         (prn _)))))
 
 (defmethod push :link [opts]
-  (println opts))
+  (let [apikey (apikey? opts)
+        endpoint (url/encode opts)
+        title (opts :title)
+        body (opts :body)
+        link (opts :url)]
+    (if (nil? link)
+      (throw (Throwable. "link url required"))
+      (as-> endpoint _
+        @(http/post _ {:headers {"Access-Token" apikey
+                                 "Content-Type" "application/json"}
+                       :body (generate-string {"body" body
+                                               "title" title
+                                               "url" link
+                                               "type" "link"})})
+        (decode-resp _)
+        (prn _)))))
 
+; still working on multipart file post
 (defmethod push :file [opts]
-  (println opts))
+  (let [apikey (apikey? opts)
+        upload-point (url/encode (assoc opts :iden :upload))
+        endpoint (url/encode opts)
+        title (opts :title)
+        body (opts :body)
+        file (opts :file)
+        filename (-> file (string/split #"/") (last))]
+    (if (nil? file)
+      (throw (Throwable. "file path required"))
+      (as-> upload-point _
+        @(http/post _ {:headers {"Access-Token" apikey
+                                 "Content-Type" "application/json"}
+                       :body (generate-string {"file_name" filename
+                                               "file_type" (mime/ext-mime-type filename)})})
+        (decode-resp _)
+        @(http/post (_ "upload_url") {:headers {"Access-Token" apikey
+                                                "Content-Type" "multipart/form-data"}
+                                      :multipart [:form
+                                                    {:action "/file" :method "post" :enctype "multipart/form-data"}
+                                                    [:input {:name file :type "file"}]]})))))
+
 
 ;;--- Socket Subscription
 (defn default-handle [msg]
@@ -91,6 +131,7 @@
 
 (defn handle-wrap [msg]
   (-> msg
+    ;(#( (prn %1) (parse-string %1)))
     (parse-string)
     (@socket-handle)))
 
